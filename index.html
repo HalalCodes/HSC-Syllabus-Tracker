@@ -65,15 +65,17 @@ header{position:sticky;top:0;z-index:50;background:rgba(250,252,255,.78);border-
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-import { getFirestore, doc, collection, onSnapshot, setDoc, updateDoc, increment, serverTimestamp, query, where, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { getFirestore, doc, collection, onSnapshot, setDoc, updateDoc, increment, serverTimestamp, query, where, orderBy, limit, getDocs, getDoc, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 const firebaseConfig={apiKey:"AIzaSyDTxAR3ZagbGfQRfHShJWqZmNcdatdDt-E",authDomain:"halalcodes.firebaseapp.com",projectId:"halalcodes",storageBucket:"halalcodes.firebasestorage.app",messagingSenderId:"455441854041",appId:"1:455441854041:web:d18a04ddd5f7557b014b48",measurementId:"G-HJPGXT493Z"};
-const app=initializeApp(firebaseConfig),db=getFirestore(app),counterRef=doc(db,"publicStats","landingPage");
+const app=initializeApp(firebaseConfig),db=getFirestore(app),auth=getAuth(app),counterRef=doc(db,"publicStats","landingPage");
 const downloadEl=document.getElementById("downloadCount"),visitorEl=document.getElementById("uniqueVisitCount");
 const apkLinks=[...document.querySelectorAll('a[href*="/releases/download/"]')];
 function num(el,v){if(el)el.textContent=Number(v||0).toLocaleString("en-US")}
 function cache(d){try{localStorage.setItem("hsc_tracker_public_counters_v1",JSON.stringify(d))}catch(_){}}
 try{const c=JSON.parse(localStorage.getItem("hsc_tracker_public_counters_v1")||"{}");num(downloadEl,c.downloadClicks);num(visitorEl,c.visitors)}catch(_){ }
 if(navigator.onLine){
+ trackReferralVisit();
  onSnapshot(counterRef,s=>{const d=s.data()||{};const v={downloadClicks:Number(d.downloadClicks||0),visitors:Number(d.visitors||0)};num(downloadEl,v.downloadClicks);num(visitorEl,v.visitors);cache(v)},()=>{});
  (async()=>{try{const a=await getDocs(query(collection(db,"reviews"),where("rating","==",5),orderBy("createdAt","desc"),limit(3)));const b=await getDocs(query(collection(db,"reviews"),where("rating","==",4),orderBy("createdAt","desc"),limit(3)));renderFeatured([...a.docs,...b.docs].sort((x,y)=>Number(y.data().rating)-Number(x.data().rating)).slice(0,3))}catch(_){renderFeatured([])}})();
  if(!sessionStorage.getItem("hsc_tracker_visitor_counted_v2")){try{await setDoc(counterRef,{downloadClicks:increment(0),visitors:increment(1),updatedAt:serverTimestamp()},{merge:true});sessionStorage.setItem("hsc_tracker_visitor_counted_v2","1")}catch(_){}}
@@ -82,6 +84,28 @@ if(navigator.onLine){
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]))}
 function stars(n){n=Number(n||0);return "★".repeat(n)+"☆".repeat(5-n)}
 function date(ts){if(!ts)return "";const d=ts.toDate?ts.toDate():new Date(ts);return d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
+async function trackReferralVisit(){
+  const params=new URLSearchParams(location.search),ref=params.get("ref");
+  if(!ref || !navigator.onLine) return;
+  try{
+    const anon=auth.currentUser || (await signInAnonymously(auth)).user;
+    if(!anon || !anon.uid || anon.uid===ref) return;
+    const clickRef=doc(db,"referrals",ref,"clicks",anon.uid);
+    const statsRef=doc(db,"referrals",ref,"stats","summary");
+    const existing=await getDoc(clickRef);
+    if(existing.exists()) return;
+    const statsSnap=await getDoc(statsRef);
+    const batch=writeBatch(db);
+    batch.set(clickRef,{visitorId:anon.uid,referrerId:ref,createdAt:serverTimestamp()});
+    if(statsSnap.exists()){
+      batch.update(statsRef,{uniqueClicks:Number(statsSnap.data().uniqueClicks||0)+1,updatedAt:serverTimestamp()});
+    }else{
+      batch.set(statsRef,{uniqueClicks:1,updatedAt:serverTimestamp()});
+    }
+    await batch.commit();
+  }catch(e){console.warn("Referral tracking unavailable:",e)}
+}
+
 function renderFeatured(docs){const box=document.getElementById("featuredReviews");if(!box)return;if(!docs.length){box.innerHTML='<div class="review-empty glass">এখনও কোনো 4★ বা 5★ review পাওয়া যায়নি।</div>';return}box.innerHTML=docs.map(r=>{const d=r.data();return `<article class="review-preview-card glass"><div class="review-preview-head"><img class="review-preview-avatar" src="${esc(d.photoURL||"")}" alt="" onerror="this.style.visibility='hidden'"><div><div class="review-preview-name">${esc(d.displayName||"Google User")}</div><div class="review-preview-date">${esc(date(d.createdAt||d.updatedAt))}</div></div></div><div class="review-preview-stars">${stars(Number(d.rating||0))}</div><div class="review-preview-body">${esc(d.text||"")}</div></article>`}).join("")}
 </script>
 <script>
