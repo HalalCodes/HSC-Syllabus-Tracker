@@ -35,12 +35,12 @@ footer{padding:20px 0 35px;text-align:center;color:#8b98a9;font-size:11px}.back{
 <div class="toast" id="toast"></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocs, getCountFromServer, query, orderBy, limit, startAfter, where, increment, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 const firebaseConfig={apiKey:"AIzaSyDTxAR3ZagbGfQRfHShJWqZmNcdatdDt-E",authDomain:"halalcodes.firebaseapp.com",projectId:"halalcodes",storageBucket:"halalcodes.firebasestorage.app",messagingSenderId:"455441854041",appId:"1:455441854041:web:d18a04ddd5f7557b014b48",measurementId:"G-HJPGXT493Z"};
 const ADMIN_EMAIL="mdomorfaruk2r@gmail.com";
-const app=initializeApp(firebaseConfig);const auth=getAuth(app);const db=getFirestore(app);const provider=new GoogleAuthProvider();
+const app=initializeApp(firebaseConfig);const auth=getAuth(app);const db=getFirestore(app);const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:"select_account"});
 const REV=collection(db,"reviews"), COUNTER=doc(db,"publicStats","landingPage");
 let currentUser=null,currentPage=1,totalReviews=0,totalPages=1,editingId=null,selectedRating=5,cursors={1:null};
 const $=id=>document.getElementById(id), isAdmin=()=>!!currentUser&&String(currentUser.email||"").toLowerCase()===ADMIN_EMAIL.toLowerCase();
@@ -50,9 +50,36 @@ function stars(n){n=Number(n||0);return "★".repeat(n)+"☆".repeat(5-n)}
 function formatDate(ts){if(!ts)return "";const d=ts.toDate?ts.toDate():new Date(ts);return d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
 function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove("show"),2600)}
 function showLoginState(){if(currentUser){$("loginBtn").style.display="none";$("userChip").style.display="flex";$("userPhoto").src=currentUser.photoURL||"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Crect width='100%25' height='100%25' rx='30' fill='%23eaf2ff'/%3E%3C/svg%3E";$("userName").textContent=currentUser.displayName||currentUser.email||"Google user"}else{$("loginBtn").style.display="inline-flex";$("userChip").style.display="none"}}
-async function login(){try{if(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent))await signInWithRedirect(auth,provider);else await signInWithPopup(auth,provider)}catch(e){console.error(e);toast("Google login failed. Please try again.")}}
-$("loginBtn").onclick=login;$("signOutBtn").onclick=()=>signOut(auth);getRedirectResult(auth).catch(e=>console.warn(e));
-onAuthStateChanged(auth,u=>{currentUser=u;showLoginState();});
+let authBusy=false;
+async function login(){
+  if(authBusy)return;
+  authBusy=true;
+  try{
+    await setPersistence(auth,browserLocalPersistence);
+    await signInWithPopup(auth,provider);
+  }catch(e){
+    console.error("Firebase Google sign-in error:",e);
+    const code=e?.code||"";
+    if(code==="auth/popup-blocked"||code==="auth/popup-closed-by-user"||code==="auth/cancelled-popup-request"){
+      try{await setPersistence(auth,browserLocalPersistence);await signInWithRedirect(auth,provider);return}catch(err){console.error("Redirect sign-in error:",err);}
+    }
+    const msg=code==="auth/unauthorized-domain"?"এই ওয়েবসাইটটি Firebase Authentication-এর Authorized Domains-এ যোগ করা হয়নি।":code==="auth/operation-not-allowed"?"Firebase Console-এ Google Sign-in চালু করুন.":code==="auth/network-request-failed"?"ইন্টারনেট সংযোগ পরীক্ষা করুন.":"Google login সম্পন্ন হয়নি। আবার চেষ্টা করুন।";
+    toast(msg);
+  }finally{authBusy=false;}
+}
+$("loginBtn").onclick=login;
+$("signOutBtn").onclick=async()=>{try{await signOut(auth);toast("Signed out.")}catch(e){console.error(e);toast("Logout failed.")}};
+(async()=>{
+  try{
+    await setPersistence(auth,browserLocalPersistence);
+    const result=await getRedirectResult(auth);
+    if(result?.user)toast("Google login successful.");
+  }catch(e){
+    console.error("Redirect result error:",e);
+    if(e?.code==="auth/unauthorized-domain")toast("Firebase Authorized Domain সেট করুন।");
+  }
+})();
+onAuthStateChanged(auth,u=>{currentUser=u;showLoginState();if(u){$("loginBtn").style.display="none";}});
 
 function openModal(review=null){if(!currentUser){toast("Review দিতে আগে Google দিয়ে login করুন.");login();return}editingId=review?.id||null;selectedRating=Number(review?.rating||5);$("modalTitle").textContent=review?"Edit Review":"আপনার Review";$("reviewText").value=review?.text||"";updateStars();$("reviewModal").classList.add("show");setTimeout(()=>$("reviewText").focus(),80)}
 function closeModal(){$("reviewModal").classList.remove("show");editingId=null}
