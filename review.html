@@ -39,56 +39,382 @@ header{position:sticky;top:0;z-index:50;background:rgba(250,252,255,.88);border-
 <div class="toast" id="toast"></div>
 
 <script type="module">
-const FIREBASE_BASE="https://www.gstatic.com/firebasejs/12.18.0/";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, setPersistence, browserLocalPersistence, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, updateDoc, query, orderBy, limit, startAfter, where, getCountFromServer, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
 const CONFIG={apiKey:"AIzaSyDTxAR3ZagbGfQRfShJWqZmNcdatdDt-E",authDomain:"halalcodes.firebaseapp.com",projectId:"halalcodes",storageBucket:"halalcodes.firebasestorage.app",messagingSenderId:"455441854041",appId:"1:455441854041:web:d18a04ddd5f7557b014b48"};
 const ADMIN_EMAIL="mdomorfaruk2r@gmail.com",SITE="https://hsc-syllabus-tracker-buet.vercel.app/";
 const $=id=>document.getElementById(id), esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
-let lang=localStorage.getItem("reviewLang")||"bn",currentUser=null,currentPage=1,totalPages=1,cursors={1:null},editingId=null,replyingId=null,rating=5,db,auth,provider,REV,COUNTER,REF_CODES;
+
+let lang=localStorage.getItem("reviewLang")||"bn",currentUser=null,currentPage=1,totalPages=1,pageDocs={},editingId=null,replyingId=null,rating=5;
+let app, auth, db, provider, REV, COUNTER, REF_CODES;
+
 const T={
 bn:{title:"HSC Science Master Tracker-এর Reviews",subtitle:"যারা অ্যাপটি ব্যবহার করেছেন, তাদের সত্যিকারের মতামত দেখুন।",login:"Google দিয়ে লগইন",logout:"লগআউট",profile:"প্রোফাইল",write:"আপনার রিভিউ দিন",all:"সব রিভিউ",save:"রিভিউ প্রকাশ করুন",edit:"এডিট",del:"ডিলিট",report:"রিপোর্ট",reply:"রিপ্লাই",copy:"লিংক কপি",share:"শেয়ার",card:"ID Card ডাউনলোড",goal:"ভেরিফাইড হতে ১০ জন unique visitor প্রয়োজন।",verified:"ভেরিফাইড",no:"এখনও কোনো রিভিউ নেই।",loading:"রিভিউ লোড হচ্ছে…",loginFirst:"রিভিউ দিতে আগে Google দিয়ে লগইন করুন।",already:"আপনি ইতিমধ্যে একটি রিভিউ দিয়েছেন। নিজের রিভিউটি এডিট করুন।",more:"রিভিউ আরও একটু বিস্তারিত লিখুন।"},
 en:{title:"HSC Science Master Tracker Reviews",subtitle:"See real feedback from students who have used the app.",login:"Sign in with Google",logout:"Sign out",profile:"Profile",write:"Write a Review",all:"All Reviews",save:"Publish Review",edit:"Edit",del:"Delete",report:"Report",reply:"Reply",copy:"Copy Link",share:"Share",card:"Download ID Card",goal:"10 unique visitors are required for verification.",verified:"Verified",no:"No reviews yet.",loading:"Loading reviews…",loginFirst:"Sign in with Google before reviewing.",already:"You already have a review. Edit your existing review.",more:"Please write a little more detail."}
 };
-function applyLang(){const t=T[lang];document.documentElement.lang=lang;$("langBtn").textContent=lang==="bn"?"English":"বাংলা";$("loginBtn").textContent=currentUser&&!currentUser.isAnonymous?t.logout:t.login;$("title").textContent=t.title;$("subtitle").textContent=t.subtitle;$("writeBtn").textContent="✦ "+t.write;$("allTitle").textContent=t.all}
+
+function applyLang(){
+  const t=T[lang];document.documentElement.lang=lang;
+  $("langBtn").textContent=lang==="bn"?"English":"বাংলা";
+  $("loginBtn").textContent=currentUser&&!currentUser.isAnonymous?t.logout:t.login;
+  $("title").textContent=t.title;$("subtitle").textContent=t.subtitle;
+  $("writeBtn").textContent="✦ "+t.write;$("allTitle").textContent=t.all;
+}
+
 function toast(m){const x=$("toast");x.textContent=m;x.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>x.classList.remove("show"),2800)}
 function admin(){return !!currentUser&&!currentUser.isAnonymous&&String(currentUser.email||"").toLowerCase()===ADMIN_EMAIL.toLowerCase()}
 function real(){return !!currentUser&&!currentUser.isAnonymous}
-function badge(type){const color=type==="admin"?"#FF0000":"#00A884";return `<svg class="verified" viewBox="0 0 24 24" aria-label="Verified"><path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.152-.435.248-.9.248-1.4-.5-.965-.9-1.4-1.4-1.4C14.55 2.475 13.18 1.6 11.6 1.6c-1.58 0-2.95.875-3.6 2.148-.435-.152-.9-.248-1.4-.248-2.21 0-4 1.79-4 4 0 .5.1.965.248 1.4C1.475 9.55.6 10.92.6 12.5c0 1.58.875 2.95 2.148 3.6-.152.435-.248.9-.248 1.4 0 .5.1.965.248 1.4 0 .5.1.965.248 1.4 1.273-.65 2.148-2.02 2.148-3.6 0-.5-.1-.965-.248-1.4.65 1.273 2.02 2.148 3.6 2.148 1.58 0 2.95-.875 3.6-2.148.435-.152.9-.248 1.4-.248 2.21 0 4-1.79 4-4 0-.5-.1-.965-.248-1.4 1.273-.65 2.148-2.02 2.148-3.6z" fill="${color}"/><path d="M9.86 15.17 6.69 12c-.39-.39-1.02-.39-1.41 0-.39.39-.39 1.02 0 1.41l3.88 3.88c.39.39 1.02.39 1.41 0l7.78-7.78c.39-.39.39-1.02 0-1.41-.39-.39-1.02-.39-1.41 0l-7.78 7.78z" fill="#fff"/></svg>`}
+
+function badge(type){
+  const color=type==="admin"?"#FF0000":"#00A884";
+  return `<svg class="verified" viewBox="0 0 24 24" aria-label="Verified"><path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.152-.435.248-.9.248-1.4-.5-.965-.9-1.4-1.4-1.4C14.55 2.475 13.18 1.6 11.6 1.6c-1.58 0-2.95.875-3.6 2.148-.435-.152-.9-.248-1.4-.248-2.21 0-4 1.79-4 4 0 .5.1.965.248 1.4C1.475 9.55.6 10.92.6 12.5c0 1.58.875 2.95 2.148 3.6-.152.435-.248.9-.248 1.4 0 .5.1.965.248 1.4 0 .5.1.965.248 1.4 1.273-.65 2.148-2.02 2.148-3.6 0-.5-.1-.965-.248-1.4.65 1.273 2.02 2.148 3.6 2.148 1.58 0 2.95-.875 3.6-2.148.435-.152.9-.248 1.4-.248 2.21 0 4-1.79 4-4 0-.5-.1-.965-.248-1.4 1.273-.65 2.148-2.02 2.148-3.6z" fill="${color}"/><path d="M9.86 15.17 6.69 12c-.39-.39-1.02-.39-1.41 0-.39.39-.39 1.02 0 1.41l3.88 3.88c.39.39 1.02.39 1.41 0l7.78-7.78c.39-.39.39-1.02 0-1.41-.39-.39-1.02-.39-1.41 0l-7.78 7.78z" fill="#fff"/></svg>`;
+}
 function stars(n){n=Math.max(0,Math.min(5,Number(n)||0));return "★".repeat(n)+"☆".repeat(5-n)}
 function fmt(ts){try{const d=ts?.toDate?ts.toDate():new Date(ts);return d.toLocaleDateString(lang==="bn"?"bn-BD":"en-GB",{day:"numeric",month:"short",year:"numeric"})}catch{return ""}}
-function menu(d){const own=real()&&d.uid===currentUser.uid,a=admin();let x="";if(own||a)x+=`<button data-action="edit" data-id="${esc(d.id)}">✎ ${T[lang].edit}</button><button class="danger" data-action="delete" data-id="${esc(d.id)}">⌫ ${T[lang].del}</button>`;else if(real())x+=`<button data-action="report" data-id="${esc(d.id)}">⚑ ${T[lang].report}</button>`;if(a)x+=`<button data-action="reply" data-id="${esc(d.id)}">↩ ${T[lang].reply}</button>`;return `<div class="menu-wrap"><button class="more" aria-label="More">⋮</button><div class="menu">${x||"<button disabled>No action</button>"}</div></div>`}
-function reviewCard(d){const verified=d.role==="admin"?badge("admin"):(d.verified?badge("user"):"");return `<article class="review glass"><div class="review-head"><img class="avatar" src="${esc(d.photoURL||"")}" alt="" onerror="this.style.visibility='hidden'"><div class="meta"><div class="name"><span class="name-text">${esc(d.displayName||"Google User")}</span>${verified}</div><div class="date">${esc(fmt(d.createdAt||d.updatedAt))}</div></div>${menu(d)}</div><div class="stars">${stars(d.rating)}</div><div class="body">${esc(d.text||"")}</div>${d.adminReply?`<div class="reply"><div class="reply-head">${badge("admin")} Developer Reply</div><div class="reply-text">${esc(d.adminReply)}</div><div class="date">${esc(fmt(d.adminReplyAt))}</div></div>`:""}</article>`}
-function renderProfile(count,code){if(!real()){$("profileMount").innerHTML="";return}const verified=admin()||count>=10,url=SITE+"?r="+encodeURIComponent(code);$("profileMount").innerHTML=`<section class="profile glass"><div class="profile-top"><img class="profile-photo" src="${esc(currentUser.photoURL||"")}" alt=""><div><div class="profile-name">${esc(currentUser.displayName||"Google User")}${verified?badge(admin()?"admin":"user"):""}</div><div class="sub">UID: ${esc(currentUser.uid)}</div></div></div><div class="share"><b>${lang==="bn"?"আপনার শেয়ার লিংক":"Your share link"}</b><div class="url">${esc(url)}</div><div class="progress"><i style="width:${Math.min(100,count/10*100)}%"></i></div><div class="sub">${lang==="bn"?"রেফারেল":"Referrals"}: <b>${count}/10</b> • ${verified?T[lang].verified:T[lang].goal}</div><div class="actions"><button class="btn primary" id="copyRef">${T[lang].copy}</button><button class="btn" id="shareRef">${T[lang].share}</button><button class="btn" id="cardBtn">${T[lang].card}</button></div></div></section>`;$("copyRef").onclick=async()=>{try{await navigator.clipboard.writeText(url);toast(lang==="bn"?"লিংক কপি হয়েছে।":"Link copied.")}catch{toast(url)}};$("shareRef").onclick=async()=>{try{if(navigator.share)await navigator.share({title:"HSC Science Master Tracker",url});else await navigator.clipboard.writeText(url)}catch{}};$("cardBtn").onclick=()=>downloadCard(count,verified)}
-async function ensureCode(){if(!real())return "";const code=(String(currentUser.displayName||"user").trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g,"").slice(0,12)||"user")+"-"+hash(currentUser.uid);try{await setDoc(doc(REF_CODES,code),{uid:currentUser.uid,displayName:currentUser.displayName||"Google User",updatedAt:serverTimestamp()},{merge:true})}catch{}return code}
+
+function menu(d){
+  const own=real()&&d.uid===currentUser.uid,a=admin();
+  let x="";
+  if(own||a)x+=`<button data-action="edit" data-id="${esc(d.id)}">✎ ${T[lang].edit}</button><button class="danger" data-action="delete" data-id="${esc(d.id)}">⌫ ${T[lang].del}</button>`;
+  else if(real())x+=`<button data-action="report" data-id="${esc(d.id)}">⚑ ${T[lang].report}</button>`;
+  if(a)x+=`<button data-action="reply" data-id="${esc(d.id)}">↩ ${T[lang].reply}</button>`;
+  return `<div class="menu-wrap"><button class="more" aria-label="More">⋮</button><div class="menu">${x||"<button disabled>No action</button>"}</div></div>`;
+}
+
+function reviewCard(d){
+  // এডমিন হলে লাল ব্যাজ, সাধারণ ইউজার ভেরিফাইড হলে সবুজ ব্যাজ
+  const verifiedBadge = d.role === "admin" ? badge("admin") : (d.verified ? badge("user") : "");
+  return `<article class="review glass"><div class="review-head"><img class="avatar" src="${esc(d.photoURL||"")}" alt="" onerror="this.style.visibility='hidden'"><div class="meta"><div class="name"><span class="name-text">${esc(d.displayName||"Google User")}</span>${verifiedBadge}</div><div class="date">${esc(fmt(d.createdAt||d.updatedAt))}</div></div>${menu(d)}</div><div class="stars">${stars(d.rating)}</div><div class="body">${esc(d.text||"")}</div>${d.adminReply?`<div class="reply"><div class="reply-head">${badge("admin")} Developer Reply</div><div class="reply-text">${esc(d.adminReply)}</div><div class="date">${esc(fmt(d.adminReplyAt))}</div></div>`:""}</article>`;
+}
+
+function renderProfile(count,code){
+  if(!real()){$("profileMount").innerHTML="";return}
+  // এডমিন এর জন্য ভেরিফিকেশন সরাসরি সত্য, সাধারণ ইউজারের জন্য ১০টা ক্লিক প্রয়োজন
+  const verified = admin() || count >= 10;
+  const url=SITE+"?r="+encodeURIComponent(code);
+  $("profileMount").innerHTML=`<section class="profile glass"><div class="profile-top"><img class="profile-photo" src="${esc(currentUser.photoURL||"")}" alt=""><div><div class="profile-name">${esc(currentUser.displayName||"Google User")}${verified?badge(admin()?"admin":"user"):""}</div><div class="sub">UID: ${esc(currentUser.uid)}</div></div></div><div class="share"><b>${lang==="bn"?"আপনার শেয়ার লিংক":"Your share link"}</b><div class="url">${esc(url)}</div><div class="progress"><i style="width:${Math.min(100,count/10*100)}%"></i></div><div class="sub">${lang==="bn"?"রেফারেল":"Referrals"}: <b>${count}/10</b> • ${verified?T[lang].verified:T[lang].goal}</div><div class="actions"><button class="btn primary" id="copyRef">${T[lang].copy}</button><button class="btn" id="shareRef">${T[lang].share}</button><button class="btn" id="cardBtn">${T[lang].card}</button></div></div></section>`;
+  $("copyRef").onclick=async()=>{try{await navigator.clipboard.writeText(url);toast(lang==="bn"?"লিংক কপি হয়েছে।":"Link copied.")}catch{toast(url)}};
+  $("shareRef").onclick=async()=>{try{if(navigator.share)await navigator.share({title:"HSC Science Master Tracker",url});else await navigator.clipboard.writeText(url)}catch{}};
+  $("cardBtn").onclick=()=>downloadCard(count,verified);
+}
+
+async function ensureCode(){
+  if(!real())return "";
+  const code=(String(currentUser.displayName||"user").trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g,"").slice(0,12)||"user")+"-"+hash(currentUser.uid);
+  try{await setDoc(doc(REF_CODES,code),{uid:currentUser.uid,displayName:currentUser.displayName||"Google User",updatedAt:serverTimestamp()},{merge:true})}catch{}
+  return code;
+}
+
 function hash(s){let a=2166136261>>>0;for(const c of String(s))a=Math.imul(a^c,16777619)>>>0;return a.toString(36).slice(-7)}
-async function referral(){const p=new URLSearchParams(location.search),code=p.get("r");if(!code)return;try{const c=await getDoc(doc(REF_CODES,code));if(!c.exists())return;const ref=c.data().uid;if(currentUser?.uid===ref)return;if(!currentUser)await signInAnonymously(auth);if(!auth.currentUser||auth.currentUser.uid===ref)return;const visitor=auth.currentUser.uid,click=doc(db,"referrals",ref,"clicks",visitor),stats=doc(db,"referrals",ref,"stats","summary");if((await getDoc(click)).exists())return;const s=await getDoc(stats),batch=writeBatch(db);batch.set(click,{visitorId:visitor,referrerId:ref,code,createdAt:serverTimestamp()});if(s.exists())batch.update(stats,{uniqueClicks:Number(s.data().uniqueClicks||0)+1,updatedAt:serverTimestamp()});else batch.set(stats,{uniqueClicks:1,updatedAt:serverTimestamp()});await batch.commit();$("refBanner").textContent=(lang==="bn"?"এই পেজটি একটি referral link থেকে এসেছে।":"This page was opened through a referral link.");$("refBanner").classList.add("show")}catch(e){console.warn("referral",e)}}
-async function refreshOwnVerification(count){if(!real())return;const r=await getDoc(doc(REV,currentUser.uid));if(!r.exists())return;const d=r.data();if(!admin()&&count>=10&&!d.verified){try{await updateDoc(doc(REV,currentUser.uid),{verified:true,updatedAt:serverTimestamp()})}catch{}}}
-async function profile(){if(!real()){$("profileMount").innerHTML="";return}const code=await ensureCode(),s=await getDoc(doc(db,"referrals",currentUser.uid,"stats","summary")),count=Number(s.data()?.uniqueClicks||0);await refreshOwnVerification(count);renderProfile(count,code)}
-function openReview(d=null){if(!real()){toast(T[lang].loginFirst);return}editingId=d?.id||null;rating=Number(d?.rating||5);$("modalTitle").textContent=editingId?(lang==="bn"?"রিভিউ এডিট করুন":"Edit Review"):(lang==="bn"?"আপনার রিভিউ":"Your Review");$("reviewText").value=d?.text||"";updateStars();$("reviewModal").classList.add("show")}
-function updateStars(){$("ratingInput").querySelectorAll(".star-btn").forEach(x=>x.classList.toggle("active",Number(x.dataset.rating)<=rating))}
-async function saveReview(){if(!real())return;const text=$("reviewText").value.trim();if(text.length<5){toast(T[lang].more);return}const id=editingId||currentUser.uid,ref=doc(REV,id),old=await getDoc(ref);if(!editingId&&old.exists()){toast(T[lang].already);return}const oldData=old.data()||{},data={uid:currentUser.uid,displayName:currentUser.displayName||"Google User",photoURL:currentUser.photoURL||"",rating,text,role:admin()?"admin":"user",verified:admin()?true:(oldData.verified===true),updatedAt:serverTimestamp()};if(!old.exists())data.createdAt=serverTimestamp();try{await setDoc(ref,data,{merge:true});$("reviewModal").classList.remove("show");toast(lang==="bn"?"রিভিউ প্রকাশ হয়েছে।":"Review published.");cursors={1:null};await loadStats();await loadPage(1);await profile()}catch(e){console.error(e);toast(lang==="bn"?"রিভিউ save হয়নি। Rules পরীক্ষা করুন।":"Review could not be saved. Check Firestore Rules.")}}
-async function deleteReview(id){const r=await getDoc(doc(REV,id));if(!r.exists())return;const d=r.data();if(!admin()&&d.uid!==currentUser?.uid)return;if(confirm(lang==="bn"?"রিভিউটি মুছে ফেলবেন?":"Delete this review?")){try{await deleteDoc(doc(REV,id));toast(lang==="bn"?"ডিলিট হয়েছে।":"Deleted.");cursors={1:null};await loadStats();await loadPage(Math.min(currentPage,totalPages))}catch{toast("Delete failed.")}}}
-async function reportReview(id){if(!real())return;const reason=prompt(lang==="bn"?"রিপোর্টের কারণ লিখুন:":"Report reason:");if(!reason)return;try{await setDoc(doc(db,"reports",id+"_"+currentUser.uid),{reviewId:id,reporterUid:currentUser.uid,reason:reason.slice(0,500),createdAt:serverTimestamp()});toast(lang==="bn"?"রিপোর্ট পাঠানো হয়েছে।":"Report sent.")}catch{toast("Report failed.")}}
-async function saveReply(){if(!admin()||!replyingId)return;const text=$("replyText").value.trim();if(!text)return;try{await updateDoc(doc(REV,replyingId),{adminReply:text,adminReplyAt:serverTimestamp(),adminReplyBy:ADMIN_EMAIL,updatedAt:serverTimestamp()});$("replyModal").classList.remove("show");toast(lang==="bn"?"রিপ্লাই প্রকাশ হয়েছে।":"Reply published.");await loadPage(currentPage)}catch{toast(lang==="bn"?"রিপ্লাই save হয়নি।":"Reply failed.")}}
-async function loadStats(){try{const total=(await getCountFromServer(query(REV))).data().count,c={};for(const n of [1,2,3,4,5])c[n]=(await getCountFromServer(query(REV,where('rating','==',n)))).data().count;$('reviewStat').textContent=total.toLocaleString(lang==='bn'?'bn-BD':'en-US');$('fiveStat').textContent=c[5].toLocaleString(lang==='bn'?'bn-BD':'en-US');$('fourStat').textContent=c[4].toLocaleString(lang==='bn'?'bn-BD':'en-US');$('threeStat').textContent=c[3].toLocaleString(lang==='bn'?'bn-BD':'en-US');const avg=total?([1,2,3,4,5].reduce((a,n)=>a+n*c[n],0)/total).toFixed(1):'—';$('avgRating').textContent=avg;$('avgCount').textContent=total+' '+(lang==='bn'?'রিভিউ':'reviews');$('bars').innerHTML=[5,4,3,2,1].map(n=>`<div class="bar"><span>${n}★</span><div class="track"><div class="fill" style="width:${total?c[n]/total*100:0}%"></div></div><span>${c[n]}</span></div>`).join('');totalPages=Math.max(1,Math.ceil(total/5));renderPagination()}catch(e){console.warn(e)}}
-async function loadPage(page){try{$("reviews").innerHTML=`<div class="empty glass">${T[lang].loading}</div>`;let q=query(REV,orderBy("createdAt","desc"),limit(5));if(page>1&&cursors[page])q=query(REV,orderBy("createdAt","desc"),startAfter(cursors[page]),limit(5));const s=await getDocs(q);if(s.docs.length)cursors[page+1]=s.docs[s.docs.length-1];currentPage=page;$("reviews").innerHTML=s.empty?`<div class="empty glass">${T[lang].no}</div>`:s.docs.map(x=>reviewCard({id:x.id,...x.data()})).join("");renderPagination()}catch(e){console.error(e);$("reviews").innerHTML=`<div class="empty glass">${lang==="bn"?"রিভিউ লোড করা যায়নি। Firebase Rules/index পরীক্ষা করুন।":"Reviews could not be loaded. Check Firebase Rules/index."}`}}
-function renderPagination(){const p=$("pagination");if(totalPages<=1){p.innerHTML="";return}let h=`<button class="page" ${currentPage===1?"disabled":""} data-page="${currentPage-1}">‹</button>`;for(let i=1;i<=totalPages;i++)if(i===1||i===totalPages||Math.abs(i-currentPage)<=2)h+=`<button class="page ${i===currentPage?"active":""}" data-page="${i}">${i}</button>`;p.innerHTML=h+`<button class="page" ${currentPage===totalPages?"disabled":""} data-page="${currentPage+1}">›</button>`}
-async function downloadCard(count,verified){const W=1280,H=720,c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");const g=x.createLinearGradient(0,0,W,H);g.addColorStop(0,"#2d6cdf");g.addColorStop(1,"#52c4ff");x.fillStyle=g;x.fillRect(0,0,W,H);x.strokeStyle="#fff";x.lineWidth=10;x.strokeRect(20,20,W-40,H-40);x.fillStyle="#fff";x.fillRect(55,55,W-110,H-110);x.strokeStyle="#2d6cdf";x.lineWidth=3;x.strokeRect(70,70,W-140,H-140);x.setLineDash([10,8]);x.strokeStyle="#8dc9ff";x.strokeRect(85,85,W-170,H-170);x.setLineDash([]);x.fillStyle="#142033";x.font="900 36px Arial";x.fillText("HSC Science Master Tracker",100,130);x.fillStyle="#718096";x.font="18px Arial";x.fillText("Community Member ID Card",100,165);const photo=new Image();photo.crossOrigin="anonymous";photo.onload=()=>{x.save();x.beginPath();x.arc(205,350,105,0,Math.PI*2);x.clip();x.drawImage(photo,100,245,210,210);x.restore();drawText()};photo.onerror=drawText;photo.src=currentUser.photoURL||"";function drawText(){x.fillStyle="#142033";x.font="900 42px Arial";x.fillText(currentUser.displayName||"Google User",370,300);x.fillStyle="#718096";x.font="17px Arial";x.fillText("USER ID",370,340);x.fillStyle="#40516b";x.font="700 20px Arial";x.fillText(currentUser.uid,370,370);x.fillStyle="#718096";x.font="17px Arial";x.fillText("REFERRAL PROGRESS",370,420);x.fillStyle="#2d6cdf";x.font="900 28px Arial";x.fillText(count+"/10 UNIQUE VISITORS",370,458);x.fillStyle="#e7edf6";x.fillRect(370,480,500,15);x.fillStyle="#2d6cdf";x.fillRect(370,480,500*Math.min(1,count/10),15);x.fillStyle=verified?"#00A884":"#718096";x.font="900 24px Arial";x.fillText(verified?"VERIFIED MEMBER":"COMMUNITY MEMBER",870,600);c.toBlob(b=>{const u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download="HSC-Science-Master-Tracker-ID-Card.png";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)},"image/png")}}
+
+async function referral(){
+  const p=new URLSearchParams(location.search),code=p.get("r");
+  if(!code)return;
+  try{
+    const c=await getDoc(doc(REF_CODES,code));
+    if(!c.exists())return;
+    const ref=c.data().uid;
+    if(currentUser?.uid===ref)return;
+    if(!currentUser)await signInAnonymously(auth);
+    if(!auth.currentUser||auth.currentUser.uid===ref)return;
+    const visitor=auth.currentUser.uid,click=doc(db,"referrals",ref,"clicks",visitor),stats=doc(db,"referrals",ref,"stats","summary");
+    if((await getDoc(click)).exists())return;
+    const s=await getDoc(stats),batch=writeBatch(db);
+    batch.set(click,{visitorId:visitor,referrerId:ref,code,createdAt:serverTimestamp()});
+    if(s.exists())batch.update(stats,{uniqueClicks:Number(s.data().uniqueClicks||0)+1,updatedAt:serverTimestamp()});
+    else batch.set(stats,{uniqueClicks:1,updatedAt:serverTimestamp()});
+    await batch.commit();
+    $("refBanner").textContent=(lang==="bn"?"এই পেজটি একটি referral link থেকে এসেছে।":"This page was opened through a referral link.");
+    $("refBanner").classList.add("show");
+  }catch(e){console.warn("referral",e)}
+}
+
+async function refreshOwnVerification(count){
+  if(!real())return;
+  const r=await getDoc(doc(REV,currentUser.uid));
+  if(!r.exists())return;
+  const d=r.data();
+  if(!admin()&&count>=10&&!d.verified){
+    try{await updateDoc(doc(REV,currentUser.uid),{verified:true,updatedAt:serverTimestamp()})}catch{}
+  }
+}
+
+async function profile(){
+  if(!real()){$("profileMount").innerHTML="";return}
+  const code=await ensureCode(),s=await getDoc(doc(db,"referrals",currentUser.uid,"stats","summary")),count=Number(s.data()?.uniqueClicks||0);
+  await refreshOwnVerification(count);
+  renderProfile(count,code);
+}
+
+function openReview(d=null){
+  if(!real()){toast(T[lang].loginFirst);return}
+  editingId=d?.id||null;rating=Number(d?.rating||5);
+  $("modalTitle").textContent=editingId?(lang==="bn"?"রিভিউ এডিট করুন":"Edit Review"):(lang==="bn"?"আপনার রিভিউ":"Your Review");
+  $("reviewText").value=d?.text||"";
+  updateStars();
+  $("reviewModal").classList.add("show");
+}
+
+function updateStars(){
+  $("ratingInput").querySelectorAll(".star-btn").forEach(x=>x.classList.toggle("active",Number(x.dataset.rating)<=rating));
+}
+
+async function saveReview(){
+  if(!real())return;
+  const text=$("reviewText").value.trim();
+  if(text.length<5){toast(T[lang].more);return}
+  const id=editingId||currentUser.uid,ref=doc(REV,id),old=await getDoc(ref);
+  if(!editingId&&old.exists()){toast(T[lang].already);return}
+  const oldData=old.data()||{},
+  data={
+    uid:currentUser.uid,
+    displayName:currentUser.displayName||"Google User",
+    photoURL:currentUser.photoURL||"",
+    rating,
+    text,
+    role:admin()?"admin":"user",
+    verified:admin()?true:(oldData.verified===true),
+    updatedAt:serverTimestamp()
+  };
+  if(!old.exists())data.createdAt=serverTimestamp();
+  try{
+    await setDoc(ref,data,{merge:true});
+    $("reviewModal").classList.remove("show");
+    toast(lang==="bn"?"রিভিউ প্রকাশ হয়েছে।":"Review published.");
+    await loadStats();
+    await loadPage(1);
+    await profile();
+  }catch(e){console.error(e);toast(lang==="bn"?"রিভিউ save হয়নি। Rules পরীক্ষা করুন।":"Review could not be saved.")}
+}
+
+async function deleteReview(id){
+  const r=await getDoc(doc(REV,id));
+  if(!r.exists())return;
+  const d=r.data();
+  if(!admin()&&d.uid!==currentUser?.uid)return;
+  if(confirm(lang==="bn"?"রিভিউটি মুছে ফেলবেন?":"Delete this review?")){
+    try{
+      await deleteDoc(doc(REV,id));
+      toast(lang==="bn"?"ডিলিট হয়েছে।":"Deleted.");
+      await loadStats();
+      await loadPage(1);
+    }catch{toast("Delete failed.")}
+  }
+}
+
+async function reportReview(id){
+  if(!real())return;
+  const reason=prompt(lang==="bn"?"রিপোর্টের কারণ লিখুন:":"Report reason:");
+  if(!reason)return;
+  try{
+    await setDoc(doc(db,"reports",id+"_"+currentUser.uid),{reviewId:id,reporterUid:currentUser.uid,reason:reason.slice(0,500),createdAt:serverTimestamp()});
+    toast(lang==="bn"?"রিপোর্ট পাঠানো হয়েছে।":"Report sent.");
+  }catch{toast("Report failed.")}
+}
+
+async function saveReply(){
+  if(!admin()||!replyingId)return;
+  const text=$("replyText").value.trim();
+  if(!text)return;
+  try{
+    await updateDoc(doc(REV,replyingId),{adminReply:text,adminReplyAt:serverTimestamp(),adminReplyBy:ADMIN_EMAIL,updatedAt:serverTimestamp()});
+    $("replyModal").classList.remove("show");
+    toast(lang==="bn"?"রিপ্লাই প্রকাশ হয়েছে।":"Reply published.");
+    await loadPage(currentPage);
+  }catch{toast(lang==="bn"?"রিপ্লাই save হয়নি।":"Reply failed.")}
+}
+
+async function loadStats(){
+  try{
+    const total=(await getCountFromServer(query(REV))).data().count,c={};
+    for(const n of [1,2,3,4,5])c[n]=(await getCountFromServer(query(REV,where('rating','==',n)))).data().count;
+    $('reviewStat').textContent=total.toLocaleString(lang==='bn'?'bn-BD':'en-US');
+    $('fiveStat').textContent=c[5].toLocaleString(lang==='bn'?'bn-BD':'en-US');
+    $('fourStat').textContent=c[4].toLocaleString(lang==='bn'?'bn-BD':'en-US');
+    $('threeStat').textContent=c[3].toLocaleString(lang==='bn'?'bn-BD':'en-US');
+    const avg=total?([1,2,3,4,5].reduce((a,n)=>a+n*c[n],0)/total).toFixed(1):'—';
+    $('avgRating').textContent=avg;
+    $('avgCount').textContent=total+' '+(lang==='bn'?'রিভিউ':'reviews');
+    $('bars').innerHTML=[5,4,3,2,1].map(n=>`<div class="bar"><span>${n}★</span><div class="track"><div class="fill" style="width:${total?c[n]/total*100:0}%"></div></div><span>${c[n]}</span></div>`).join('');
+    totalPages=Math.max(1,Math.ceil(total/5));
+    renderPagination();
+  }catch(e){console.warn(e)}
+}
+
+// -------------------------------------------------------------
+// স্মার্ট লোডিং ও পেজিনেশন লজিক (প্রথম পেজে এডমিন রিভিউ সর্বপ্রথমে রাখা)
+// -------------------------------------------------------------
+async function loadPage(page){
+  try{
+    $("reviews").innerHTML=`<div class="empty glass">${T[lang].loading}</div>`;
+    currentPage=page;
+    let list = [];
+
+    if(page === 1) {
+      // পেজ ১-এ প্রথমে এডমিনের রিভিউ নিশ্চিত করা
+      const adminSnap = await getDocs(query(REV, where("role", "==", "admin"), limit(1)));
+      let adminUid = null;
+      if (!adminSnap.empty) {
+        const adminDoc = adminSnap.docs[0];
+        adminUid = adminDoc.id;
+        list.push({ id: adminDoc.id, ...adminDoc.data() });
+      }
+
+      // সাধারণ ৪টি বা ৫টি সাম্প্রতিক রিভিউ ফেচ করা (প্রতি পেজে মোট ৫টি থাকবে)
+      const fetchLimit = adminUid ? 4 : 5;
+      const recentSnap = await getDocs(query(REV, orderBy("createdAt", "desc"), limit(fetchLimit + 1)));
+      
+      let count = 0;
+      for (const d of recentSnap.docs) {
+        if (d.id !== adminUid && count < fetchLimit) {
+          list.push({ id: d.id, ...d.data() });
+          count++;
+        }
+      }
+    } else {
+      // ২, ৩, ৪... ইত্যাদি পরবর্তী পেজগুলো ফায়ারবেস কোয়েরি অনুযায়ী সর্ট হওয়া
+      const offset = (page - 1) * 5;
+      const q = query(REV, orderBy("createdAt", "desc"), limit(offset + 5));
+      const snap = await getDocs(q);
+      const docs = snap.docs.slice(offset, offset + 5);
+      list = docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+
+    if(list.length === 0){
+      $("reviews").innerHTML = `<div class="empty glass">${T[lang].no}</div>`;
+    } else {
+      $("reviews").innerHTML = list.map(x => reviewCard(x)).join("");
+    }
+    renderPagination();
+  }catch(e){
+    console.error(e);
+    $("reviews").innerHTML=`<div class="empty glass">${lang==="bn"?"রিভিউ লোড করা যায়নি। Firebase Rules পরীক্ষা করুন।":"Reviews could not be loaded."}`;
+  }
+}
+
+function renderPagination(){
+  const p=$("pagination");
+  if(totalPages<=1){p.innerHTML="";return}
+  let h=`<button class="page" ${currentPage===1?"disabled":""} data-page="${currentPage-1}">‹</button>`;
+  for(let i=1;i<=totalPages;i++) {
+    if(i===1||i===totalPages||Math.abs(i-currentPage)<=2) {
+      h+=`<button class="page ${i===currentPage?"active":""}" data-page="${i}">${i}</button>`;
+    }
+  }
+  p.innerHTML=h+`<button class="page" ${currentPage===totalPages?"disabled":""} data-page="${currentPage+1}">›</button>`;
+}
+
+async function downloadCard(count,verified){
+  const W=1280,H=720,c=document.createElement("canvas");c.width=W;c.height=H;
+  const x=c.getContext("2d");
+  const g=x.createLinearGradient(0,0,W,H);
+  g.addColorStop(0,"#2d6cdf");g.addColorStop(1,"#52c4ff");
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  x.strokeStyle="#fff";x.lineWidth=10;x.strokeRect(20,20,W-40,H-40);
+  x.fillStyle="#fff";x.fillRect(55,55,W-110,H-110);
+  x.strokeStyle="#2d6cdf";x.lineWidth=3;x.strokeRect(70,70,W-140,H-140);
+  x.setLineDash([10,8]);x.strokeStyle="#8dc9ff";x.strokeRect(85,85,W-170,H-170);x.setLineDash([]);
+  x.fillStyle="#142033";x.font="900 36px Arial";x.fillText("HSC Science Master Tracker",100,130);
+  x.fillStyle="#718096";x.font="18px Arial";x.fillText("Community Member ID Card",100,165);
+  
+  const photo=new Image();photo.crossOrigin="anonymous";
+  photo.onload=()=>{
+    x.save();x.beginPath();x.arc(205,350,105,0,Math.PI*2);x.clip();
+    x.drawImage(photo,100,245,210,210);x.restore();drawText();
+  };
+  photo.onerror=drawText;
+  photo.src=currentUser.photoURL||"";
+  
+  function drawText(){
+    x.fillStyle="#142033";x.font="900 42px Arial";x.fillText(currentUser.displayName||"Google User",370,300);
+    x.fillStyle="#718096";x.font="17px Arial";x.fillText("USER ID",370,340);
+    x.fillStyle="#40516b";x.font="700 20px Arial";x.fillText(currentUser.uid,370,370);
+    x.fillStyle="#718096";x.font="17px Arial";x.fillText("REFERRAL PROGRESS",370,420);
+    x.fillStyle="#2d6cdf";x.font="900 28px Arial";x.fillText(count+"/10 UNIQUE VISITORS",370,458);
+    x.fillStyle="#e7edf6";x.fillRect(370,480,500,15);
+    x.fillStyle="#2d6cdf";x.fillRect(370,480,500*Math.min(1,count/10),15);
+    x.fillStyle=verified?(admin()?"#FF0000":"#00A884"):"#718096";
+    x.font="900 24px Arial";
+    x.fillText(verified?(admin()?"ADMINISTRATOR":"VERIFIED MEMBER"):"COMMUNITY MEMBER",870,600);
+    
+    c.toBlob(b=>{
+      const u=URL.createObjectURL(b),a=document.createElement("a");
+      a.href=u;a.download="HSC-Science-Master-Tracker-ID-Card.png";a.click();
+      setTimeout(()=>URL.revokeObjectURL(u),1000);
+    },"image/png");
+  }
+}
+
+// 事件 Listener সসমূহ
 $("langBtn").onclick=async()=>{lang=lang==="bn"?"en":"bn";applyLang();await loadStats();await loadPage(currentPage);await profile()};
-$("loginBtn").onclick=async()=>{try{await signInWithPopup(auth,provider)}catch(e){try{await signInWithRedirect(auth,provider)}catch{toast(lang==="bn"?"Google login করা যায়নি।":"Google login failed.")}}};
-$("writeBtn").onclick=async()=>{if(!real()){await signInWithPopup(auth,provider);return}const s=await getDoc(doc(REV,currentUser.uid));openReview(s.exists()?{id:s.id,...s.data()}:null)};
+$("loginBtn").onclick=async()=>{
+  if(real()){ await signOut(auth); return; }
+  try{ await signInWithPopup(auth,provider) }
+  catch(e){
+    try{ await signInWithRedirect(auth,provider) }
+    catch{ toast(lang==="bn"?"Google login করা যায়নি।":"Google login failed.") }
+  }
+};
+$("writeBtn").onclick=async()=>{
+  if(!real()){ await signInWithPopup(auth,provider); return }
+  const s=await getDoc(doc(REV,currentUser.uid));
+  openReview(s.exists()?{id:s.id,...s.data()}:null);
+};
 $("cancelBtn").onclick=()=>$("reviewModal").classList.remove("show");
 $("saveBtn").onclick=saveReview;
 $("replyCancel").onclick=()=>$("replyModal").classList.remove("show");
 $("replySave").onclick=saveReply;
 $("ratingInput").onclick=e=>{const b=e.target.closest("[data-rating]");if(b){rating=Number(b.dataset.rating);updateStars()}};
-$("reviews").onclick=async e=>{const m=e.target.closest(".more");if(m){m.nextElementSibling.classList.toggle("open");return}const b=e.target.closest("[data-action]");if(!b)return;const s=await getDoc(doc(REV,b.dataset.id));if(!s.exists())return;const d={id:s.id,...s.data()};if(b.dataset.action==="edit")openReview(d);if(b.dataset.action==="delete")deleteReview(d.id);if(b.dataset.action==="report")reportReview(d.id);if(b.dataset.action==="reply"){replyingId=d.id;$("replyText").value=d.adminReply||"";$("replyModal").classList.add("show")}};
+$("pagination").onclick=e=>{const b=e.target.closest("[data-page]");if(b&&!b.disabled)loadPage(Number(b.dataset.page))};
+
+$("reviews").onclick=async e=>{
+  const m=e.target.closest(".more");
+  if(m){m.nextElementSibling.classList.toggle("open");return}
+  const b=e.target.closest("[data-action]");
+  if(!b)return;
+  const s=await getDoc(doc(REV,b.dataset.id));
+  if(!s.exists())return;
+  const d={id:s.id,...s.data()};
+  if(b.dataset.action==="edit")openReview(d);
+  if(b.dataset.action==="delete")deleteReview(d.id);
+  if(b.dataset.action==="report")reportReview(d.id);
+  if(b.dataset.action==="reply"){replyingId=d.id;$("replyText").value=d.adminReply||"";$("replyModal").classList.add("show")}
+};
+
 document.addEventListener("click",e=>{if(!e.target.closest(".menu-wrap"))document.querySelectorAll(".menu.open").forEach(x=>x.classList.remove("open"))});
 
-const [{initializeApp},{getAuth,GoogleAuthProvider,onAuthStateChanged,signInWithPopup,signInWithRedirect,signOut,setPersistence,browserLocalPersistence,signInAnonymously},{getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,updateDoc,query,orderBy,limit,startAfter,where,serverTimestamp,writeBatch}]=await Promise.all([import(FIREBASE_BASE+"firebase-app.js"),import(FIREBASE_BASE+"firebase-auth.js"),import(FIREBASE_BASE+"firebase-firestore.js")]);
-const app=initializeApp(CONFIG);auth=getAuth(app);db=getFirestore(app);provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:"select_account"});REV=collection(db,"reviews");COUNTER=doc(db,"publicStats","landingPage");REF_CODES=collection(db,"referralCodes");
+// Firebase Init
+app=initializeApp(CONFIG);
+auth=getAuth(app);
+db=getFirestore(app);
+provider=new GoogleAuthProvider();
+provider.setCustomParameters({prompt:"select_account"});
+REV=collection(db,"reviews");
+COUNTER=doc(db,"publicStats","landingPage");
+REF_CODES=collection(db,"referralCodes");
+
 await setPersistence(auth,browserLocalPersistence).catch(()=>{});
-onAuthStateChanged(auth,async u=>{currentUser=u;applyLang();$("loginBtn").style.display=real()?"none":"inline-flex";await referral();await profile();if(admin()){const r=await getDoc(doc(REV,currentUser.uid));if(r.exists()&&r.data().role!=="admin")await updateDoc(doc(REV,currentUser.uid),{role:"admin",verified:true,updatedAt:serverTimestamp()})}});
-applyLang();await loadStats();await loadPage(1);try{$("downloadStat").textContent=Number((await getDoc(COUNTER)).data()?.downloadClicks||0).toLocaleString(lang==="bn"?"bn-BD":"en-US")}catch{}
+
+onAuthStateChanged(auth,async u=>{
+  currentUser=u;
+  applyLang();
+  $("loginBtn").textContent=real()?(lang==="bn"?"লগআউট":"Sign out"):(lang==="bn"?"Google দিয়ে লগইন":"Sign in with Google");
+  await referral();
+  await profile();
+  if(admin()){
+    const r=await getDoc(doc(REV,currentUser.uid));
+    if(r.exists()&&r.data().role!=="admin"){
+      await updateDoc(doc(REV,currentUser.uid),{role:"admin",verified:true,updatedAt:serverTimestamp()})
+    }
+  }
+});
+
+applyLang();
+await loadStats();
+await loadPage(1);
+try{$("downloadStat").textContent=Number((await getDoc(COUNTER)).data()?.downloadClicks||0).toLocaleString(lang==="bn"?"bn-BD":"en-US")}catch{}
 </script>
 </body>
 </html>
