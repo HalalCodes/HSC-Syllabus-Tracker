@@ -54,7 +54,6 @@ section{padding:60px 0}.head{text-align:center;max-width:730px;margin:0 auto 30p
 
 <script>
 const APK="https://github.com/HalalCodes/HSC-Syllabus-Tracker/releases/download/v1.2026.33/Study.Tracker.apk";
-const SITE="./";
 let lang=localStorage.getItem("landingLang")||"bn";
 const TEXT={
 bn:{eyebrow:"HSC Science • Study Tracker",title:'HSC পড়াশোনাকে <span class="gradient">Track</span> করুন, লক্ষ্যকে বাস্তব করুন।',subtitle:"সিলেবাস, অধ্যায়, অগ্রগতি, টার্গেট ও HSC journey—সবকিছু এক জায়গায় গুছিয়ে রাখুন।",download:"অ্যাপ ডাউনলোড করুন",reviews:"ব্যবহারকারীদের রিভিউ",statsTitle:"অ্যাপ কমিউনিটির লাইভ তথ্য",statsDesc:"ডাউনলোড বাটনে কতবার ক্লিক হয়েছে এবং ব্যবহারকারীদের রিভিউ—লাইভ দেখা যাবে।",downloadLabel:"মোট ডাউনলোড ক্লিক",reviewLabel:"মোট রিভিউ",featuredTitle:"ব্যবহারকারীদের 4★ ও 5★ রিভিউ",featuredDesc:"সবার আগে ডেভেলপারের রিভিউ, এরপর অন্য ভালো রিভিউগুলো একে একে দেখানো হবে।",more:"সব রিভিউ দেখুন →",shotsTitle:"অ্যাপের কিছু ঝলক",shotsDesc:"আপনার HSC study journey আরও পরিষ্কারভাবে পরিচালনা করার জন্য তৈরি।",ctaTitle:"আপনার HSC comeback আজ থেকেই শুরু করুন",ctaDesc:"সিলেবাস কোথায় আছে, কতটুকু শেষ হয়েছে এবং পরের লক্ষ্য কী—সবকিছু এক নজরে ট্র্যাক করুন।",cta:"এখনই অ্যাপ ডাউনলোড করুন",loading:"রিভিউ লোড হচ্ছে…",empty:"এখনও কোনো 4★ বা 5★ রিভিউ পাওয়া যায়নি।",reply:"ডেভেলপার রিপ্লাই"},
@@ -70,31 +69,57 @@ let timer=null,index=0,items=[],paused=false,resume=null;
 function esc(v){return String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]))}
 function stars(n){n=Math.max(0,Math.min(5,Number(n)||0));return "★".repeat(n)+"☆".repeat(5-n)}
 function date(v){try{const d=v?.toDate?v.toDate():new Date(v);return d.toLocaleDateString(lang==="bn"?"bn-BD":"en-GB",{day:"numeric",month:"short",year:"numeric"})}catch{return ""}}
-function adminBadge(){return '<svg width="20" height="20" viewBox="0 0 24 24" aria-label="Verified"><path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.152-.435.248-.9.248-1.4 0-.5-.1-.965-.248-1.4C14.55 2.475 13.18 1.6 11.6 1.6c-1.58 0-2.95.875-3.6 2.148-.435-.152-.9-.248-1.4-.248-2.21 0-4 1.79-4 4 0 .5.1.965.248 1.4C1.475 9.55.6 10.92.6 12.5c0 1.58.875 2.95 2.148 3.6-.152.435-.248.9-.248 1.4 0 .5.1.965.248 1.4 0 2.21 1.79 4 4 4 .5 0 .965-.1 1.4-.248.65 1.273 2.02 2.148 3.6 2.148 1.58 0 2.95-.875 3.6-2.148.435-.152.9-.248 1.4-.248.5 0 .965-.1 1.4-.248 1.273-.65 2.148-2.02 2.148-3.6z" fill="#FF0000"/><path d="M9.86 15.17 6.69 12c-.39-.39-1.02-.39-1.41 0-.39.39-.39 1.02 0 1.41l3.88 3.88c.39.39 1.02.39 1.41 0l7.78-7.78c.39-.39.39-1.02 0-1.41-.39-.39-1.02-1.02 0-1.41l-7.78 7.78z" fill="#fff"/></svg>'}
-function card(d){return `<article class="review glass" tabindex="0"><div class="review-head"><img class="avatar" src="${esc(d.photoURL||"")}" alt="" onerror="this.style.visibility='hidden'"><div><div class="name">${esc(d.displayName||"Google User")}${d.role==="admin"?adminBadge():""}</div><div class="date">${esc(date(d.createdAt||d.updatedAt))}</div></div></div><div class="stars">${stars(d.rating)}</div><div class="body">${esc(d.text||"")}</div>${d.adminReply?`<div class="reply"><b>${TEXT[lang].reply}</b>${esc(d.adminReply)}</div>`:""}</article>`}
+function badge(type){
+  const color=type==="admin"?"#FF0000":"#00A884";
+  return `<svg width="18" height="18" viewBox="0 0 24 24" aria-label="Verified"><path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.152-.435.248-.9.248-1.4-.5-.965-.9-1.4-1.4-1.4C14.55 2.475 13.18 1.6 11.6 1.6c-1.58 0-2.95.875-3.6 2.148-.435-.152-.9-.248-1.4-.248-2.21 0-4 1.79-4 4 0 .5.1.965.248 1.4C1.475 9.55.6 10.92.6 12.5c0 1.58.875 2.95 2.148 3.6-.152.435-.248.9-.248 1.4 0 .5.1.965.248 1.4 0 .5.1.965.248 1.4 1.273-.65 2.148-2.02 2.148-3.6 0-.5-.1-.965-.248-1.4.65 1.273 2.02 2.148 3.6 2.148 1.58 0 2.95-.875 3.6-2.148.435-.152.9-.248 1.4-.248 2.21 0 4-1.79 4-4 0-.5-.1-.965-.248-1.4 1.273-.65 2.148-2.02 2.148-3.6z" fill="${color}"/><path d="M9.86 15.17 6.69 12c-.39-.39-1.02-.39-1.41 0-.39.39-.39 1.02 0 1.41l3.88 3.88c.39.39 1.02.39 1.41 0l7.78-7.78c.39-.39.39-1.02 0-1.41-.39-.39-1.02-.39-1.41 0l-7.78 7.78z" fill="#fff"/></svg>`;
+}
+
+function card(d){
+  const isVerified = d.role === "admin" ? badge("admin") : (d.verified ? badge("user") : "");
+  return `<article class="review glass" tabindex="0"><div class="review-head"><img class="avatar" src="${esc(d.photoURL||"")}" alt="" onerror="this.style.visibility='hidden'"><div><div class="name">${esc(d.displayName||"Google User")} ${isVerified}</div><div class="date">${esc(date(d.createdAt||d.updatedAt))}</div></div></div><div class="stars">${stars(d.rating)}</div><div class="body">${esc(d.text||"")}</div>${d.adminReply?`<div class="reply"><b>${TEXT[lang].reply}</b>${esc(d.adminReply)}</div>`:""}</article>`
+}
+
 function show(i){if(!items.length)return;index=(i+items.length)%items.length;const box=document.getElementById("featured");box.innerHTML=card(items[index]);box.firstElementChild.onclick=()=>{paused=true;clearTimeout(resume);resume=setTimeout(()=>{paused=false},30000)}}
 function start(){clearInterval(timer);if(items.length>1)timer=setInterval(()=>{if(!paused)show(index+1)},10000)}
 function render(ds){items=ds;index=0;if(!items.length){document.getElementById("featured").innerHTML=`<div class="review glass">${TEXT[lang].empty}</div>`;return}show(0);start()}
+
 async function loadFirebase(){
   try{
     const [{initializeApp},{getFirestore,collection,doc,getDoc,getDocs,getCountFromServer,query,where,limit,increment,updateDoc}]=await Promise.all([
-      import("https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js")
+      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js")
     ]);
     const app=initializeApp({apiKey:"AIzaSyDTxAR3ZagbGfQRfShJWqZmNcdatdDt-E",authDomain:"halalcodes.firebaseapp.com",projectId:"halalcodes",storageBucket:"halalcodes.firebasestorage.app",messagingSenderId:"455441854041",appId:"1:455441854041:web:d18a04ddd5f7557b014b48"});
     const db=getFirestore(app), reviews=collection(db,"reviews"), counter=doc(db,"publicStats","landingPage");
-    const [adminSnap,highSnap,statSnap]=await Promise.all([
-      getDocs(query(reviews,where("role","==","admin"),limit(1))),
-      getDocs(query(reviews,where("rating","in",[4,5]),limit(20))),
+    
+    // 1. এডমিনের রিভিউ আলাদাভাবে ফেচ করা (সর্বপ্রথমে প্রদর্শন নিশ্চিত করতে)
+    // 2. সাধারণ ইউজারদের 4 ও 5 স্টার রিভিউ ফেচ করা
+    const [adminSnap, highSnap, statSnap] = await Promise.all([
+      getDocs(query(reviews, where("role", "==", "admin"), limit(1))),
+      getDocs(query(reviews, where("rating", "in", [4, 5]), limit(20))),
       getDoc(counter)
     ]);
-    const map=new Map();
-    adminSnap.docs.forEach(x=>map.set(x.id,x.data()));
-    highSnap.docs.forEach(x=>map.set(x.id,x.data()));
-    const ds=[...map.values()].sort((a,b)=>Number(b.role==="admin")-Number(a.role==="admin") || ((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)));
-    render(ds);
+
+    let list = [];
+    const adminDocs = adminSnap.docs.map(x => ({ id: x.id, ...x.data() }));
+    const otherDocs = highSnap.docs
+      .map(x => ({ id: x.id, ...x.data() }))
+      .filter(x => x.role !== "admin"); // এডমিনকে দ্বিতীয়বার গণনা না করা
+
+    // এডমিনের রিভিউটি সবার আগে পুশ হবে
+    if (adminDocs.length > 0) {
+      list.push(adminDocs[0]);
+    }
+    
+    // সময় অনুযায়ী সর্ট করে অন্য রিভিউ যুক্ত করা
+    otherDocs.sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+    list = list.concat(otherDocs);
+
+    render(list);
+
     document.getElementById("downloadCount").textContent=Number(statSnap.data()?.downloadClicks||0).toLocaleString("bn-BD");
     document.getElementById("reviewCount").textContent=String((await getCountFromServer(query(reviews))).data().count);
+    
     async function clickCounter(){try{await updateDoc(counter,{downloadClicks:increment(1)})}catch(e){}}
     document.getElementById("downloadBtn").addEventListener("click",clickCounter,{once:false});
     document.getElementById("ctaBtn").addEventListener("click",clickCounter,{once:false});
